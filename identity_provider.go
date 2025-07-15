@@ -98,7 +98,7 @@ type IdentityProvider struct {
 	Logger                  logger.Interface
 	Certificate             *x509.Certificate
 	Intermediates           []*x509.Certificate
-	MetadataURL             url.URL
+	MetadataURL             string // allow metadata as string not only url.URL
 	SSOURL                  url.URL
 	LogoutURL               url.URL
 	ServiceProviderProvider ServiceProviderProvider
@@ -120,7 +120,7 @@ func (idp *IdentityProvider) Metadata() *EntityDescriptor {
 	}
 
 	ed := &EntityDescriptor{
-		EntityID:      idp.MetadataURL.String(),
+		EntityID:      idp.MetadataURL,
 		ValidUntil:    TimeNow().Add(validDuration),
 		CacheDuration: validDuration,
 		IDPSSODescriptors: []IDPSSODescriptor{
@@ -189,7 +189,11 @@ func (idp *IdentityProvider) Metadata() *EntityDescriptor {
 // URLs
 func (idp *IdentityProvider) Handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc(idp.MetadataURL.Path, idp.ServeMetadata)
+
+	if u, err := url.Parse(idp.MetadataURL); err == nil {
+		mux.HandleFunc(u.Path, idp.ServeMetadata)
+	}
+
 	mux.HandleFunc(idp.SSOURL.Path, idp.ServeSSO)
 	return mux
 }
@@ -1030,7 +1034,7 @@ func (req *IdpAuthnRequest) MakeResponse() error {
 		Version:      "2.0",
 		Issuer: &Issuer{
 			Format: "urn:oasis:names:tc:SAML:2.0:nameid-format:entity",
-			Value:  req.IDP.MetadataURL.String(),
+			Value:  req.IDP.MetadataURL,
 		},
 		Status: Status{
 			StatusCode: StatusCode{

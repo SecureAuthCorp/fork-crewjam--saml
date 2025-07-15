@@ -99,7 +99,7 @@ func NewIdentifyProviderTest(t *testing.T) *IdentityProviderTest {
 		Key:         test.Key,
 		Certificate: test.Certificate,
 		Logger:      logger.DefaultLogger,
-		MetadataURL: mustParseURL("https://idp.example.com/saml/metadata"),
+		MetadataURL: "https://idp.example.com/saml/metadata",
 		SSOURL:      mustParseURL("https://idp.example.com/saml/sso"),
 		ServiceProviderProvider: &mockServiceProviderProvider{
 			GetServiceProviderFunc: func(r *http.Request, serviceProviderID string) (*EntityDescriptor, error) {
