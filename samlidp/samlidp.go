@@ -61,7 +61,7 @@ func New(opts Options) (*Server, error) {
 			Key:         opts.Key,
 			Logger:      logr,
 			Certificate: opts.Certificate,
-			MetadataURL: metadataURL,
+			MetadataURL: metadataURL.String(),
 			SSOURL:      ssoURL,
 		},
 		logger: logr,
