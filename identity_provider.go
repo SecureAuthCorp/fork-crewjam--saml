@@ -390,6 +390,65 @@ func NewIdpAuthnRequest(idp *IdentityProvider, r *http.Request) (*IdpAuthnReques
 	return req, nil
 }
 
+func GetSPIssuer(r *http.Request) (string, error) {
+	var (
+		requestBuffer     []byte
+		compressedRequest []byte
+		samlRequest       string
+		ok                bool
+		request           AuthnRequest
+		err               error
+	)
+
+	if samlRequest, ok = isSAMLRequest(r); ok {
+		switch r.Method {
+		case http.MethodGet:
+			if compressedRequest, err = base64.StdEncoding.DecodeString(samlRequest); err != nil {
+				return "", ErrInvalidSAMLRequest.WithErrorf(err, "cannot decode request")
+			}
+
+			if requestBuffer, err = io.ReadAll(newSaferFlateReader(bytes.NewReader(compressedRequest))); err != nil {
+				return "", ErrInvalidSAMLRequest.WithErrorf(err, "cannot decompress request")
+			}
+		case http.MethodPost:
+			if requestBuffer, err = base64.StdEncoding.DecodeString(samlRequest); err != nil {
+				return "", ErrInvalidSAMLRequest.WithErrorf(err, "cannot decode request")
+			}
+		default:
+			return "", ErrInvalidSAMLRequest.WithMessagef("unsupported method %q", r.Method)
+		}
+
+		if err = xml.Unmarshal(requestBuffer, &request); err != nil {
+			return "", ErrInvalidSAMLRequest.WithErrorf(err, "cannot parse request")
+		}
+
+		if request.Issuer != nil && request.Issuer.Value != "" {
+			return request.Issuer.Value, nil
+		}
+
+		return "", ErrInvalidSAMLRequest.WithMessage("no Issuer in request")
+	}
+
+	return "", ErrInvalidSAMLRequest.WithMessage("not a SAML request")
+}
+
+func isSAMLRequest(r *http.Request) (string, bool) {
+	switch r.Method {
+	case http.MethodGet:
+		sr := r.URL.Query().Get("SAMLRequest")
+		return sr, sr != ""
+	case http.MethodPost:
+		if err := r.ParseForm(); err != nil {
+			return "", false
+		}
+
+		sr := r.PostForm.Get("SAMLRequest")
+		return sr, sr != ""
+	default:
+		return "", false
+	}
+}
+
 // Validate checks that the authentication request is valid and assigns
 // the AuthnRequest and Metadata properties. Returns a non-nil error if the
 // request is not valid.
