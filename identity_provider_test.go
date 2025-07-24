@@ -1039,3 +1039,138 @@ func TestIDPRejectDecompressionBomb(t *testing.T) {
 	_, err = NewIdpAuthnRequest(&test.IDP, r)
 	assert.Error(t, err, "cannot decompress request: flate: uncompress limit exceeded (10485760 bytes)")
 }
+
+func TestGetSPIssuer(t *testing.T) {
+	type testCase struct {
+		name           string
+		method         string
+		samlRequest    string // base64-encoded, optionally flate-compressed XML
+		wantIssuer     string
+		wantErrSubstr  string
+		prepareRequest func(*http.Request)
+	}
+
+	// Helper to build a minimal AuthnRequest XML with a given issuer value
+	buildAuthnRequestXML := func(issuer string) []byte {
+		return []byte(fmt.Sprintf(
+			`<AuthnRequest xmlns="urn:oasis:names:tc:SAML:2.0:protocol" Version="2.0" ID="id-1" IssueInstant="2020-01-01T00:00:00Z">
+				<Issuer xmlns="urn:oasis:names:tc:SAML:2.0:assertion">%s</Issuer>
+			</AuthnRequest>`, issuer))
+	}
+
+	// Helper to base64 encode and optionally flate-compress XML
+	flateAndBase64 := func(xml []byte) string {
+		var buf bytes.Buffer
+		w, _ := flate.NewWriter(&buf, flate.DefaultCompression)
+		w.Write(xml)
+		w.Close()
+		return base64.StdEncoding.EncodeToString(buf.Bytes())
+	}
+
+	// Helper to base64 encode XML (no compression)
+	base64Encode := func(xml []byte) string {
+		return base64.StdEncoding.EncodeToString(xml)
+	}
+
+	tests := []testCase{
+		{
+			name:        "GET valid SAMLRequest, compressed",
+			method:      http.MethodGet,
+			samlRequest: flateAndBase64(buildAuthnRequestXML("https://sp.example.com/metadata")),
+			wantIssuer:  "https://sp.example.com/metadata",
+		},
+		{
+			name:        "POST valid SAMLRequest, not compressed",
+			method:      http.MethodPost,
+			samlRequest: base64Encode(buildAuthnRequestXML("https://sp.example.com/metadata")),
+			wantIssuer:  "https://sp.example.com/metadata",
+		},
+		{
+			name:          "GET invalid base64",
+			method:        http.MethodGet,
+			samlRequest:   "!!!notbase64!!!",
+			wantErrSubstr: "cannot decode request",
+		},
+		{
+			name:          "GET invalid flate",
+			method:        http.MethodGet,
+			samlRequest:   base64Encode([]byte("not flate compressed")),
+			wantErrSubstr: "cannot decompress request",
+		},
+		{
+			name:          "POST invalid base64",
+			method:        http.MethodPost,
+			samlRequest:   "!!!notbase64!!!",
+			wantErrSubstr: "cannot decode request",
+		},
+		{
+			name:          "POST invalid XML",
+			method:        http.MethodPost,
+			samlRequest:   base64Encode([]byte("<notxml")),
+			wantErrSubstr: "cannot parse request",
+		},
+		{
+			name:          "GET missing SAMLRequest",
+			method:        http.MethodGet,
+			samlRequest:   "",
+			wantErrSubstr: "not a SAML request",
+		},
+		{
+			name:          "POST missing SAMLRequest",
+			method:        http.MethodPost,
+			samlRequest:   "",
+			wantErrSubstr: "not a SAML request",
+		},
+		{
+			name:          "GET no Issuer in request",
+			method:        http.MethodGet,
+			samlRequest:   flateAndBase64([]byte(`<AuthnRequest xmlns="urn:oasis:names:tc:SAML:2.0:protocol" Version="2.0" ID="id-1" IssueInstant="2020-01-01T00:00:00Z"></AuthnRequest>`)),
+			wantErrSubstr: "no Issuer in request",
+		},
+		{
+			name:          "unsupported method",
+			method:        "PUT",
+			samlRequest:   base64Encode(buildAuthnRequestXML("https://sp.example.com/metadata")),
+			wantErrSubstr: "not a SAML request",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var r *http.Request
+			if tc.method == http.MethodGet {
+				reqURL := "/sso"
+				if tc.samlRequest != "" {
+					reqURL += "?SAMLRequest=" + url.QueryEscape(tc.samlRequest)
+				}
+				r, _ = http.NewRequest(http.MethodGet, reqURL, nil)
+			} else if tc.method == http.MethodPost {
+				form := url.Values{}
+				if tc.samlRequest != "" {
+					form.Set("SAMLRequest", tc.samlRequest)
+				}
+				r, _ = http.NewRequest(http.MethodPost, "/sso", strings.NewReader(form.Encode()))
+				r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			} else {
+				// For unsupported methods, use POST-like body for coverage
+				form := url.Values{}
+				if tc.samlRequest != "" {
+					form.Set("SAMLRequest", tc.samlRequest)
+				}
+				r, _ = http.NewRequest(tc.method, "/sso", strings.NewReader(form.Encode()))
+				r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			}
+			if tc.prepareRequest != nil {
+				tc.prepareRequest(r)
+			}
+			gotIssuer, err := GetSPIssuer(r)
+			if tc.wantErrSubstr != "" {
+				assert.Check(t, err != nil, "expected error containing %q", tc.wantErrSubstr)
+				assert.Check(t, strings.Contains(err.Error(), tc.wantErrSubstr), "got error: %v", err)
+			} else {
+				assert.Check(t, err == nil, "unexpected error: %v", err)
+				assert.Check(t, is.Equal(tc.wantIssuer, gotIssuer))
+			}
+		})
+	}
+}
