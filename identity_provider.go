@@ -396,7 +396,7 @@ func NewIdpInitiatedAuthnRequest(
 	spMetadata *EntityDescriptor,
 	spSsoDescriptor *SPSSODescriptor,
 	acsEndpoint *IndexedEndpoint,
-) (*IdpAuthnRequest, error) {
+) *IdpAuthnRequest {
 	return &IdpAuthnRequest{
 		IDP:                     idp,
 		Now:                     TimeNow(),
@@ -404,7 +404,7 @@ func NewIdpInitiatedAuthnRequest(
 		SPSSODescriptor:         spSsoDescriptor,
 		ACSEndpoint:             acsEndpoint,
 		IDPInitiated:            true,
-	}, nil
+	}
 }
 
 func GetSPIssuer(r *http.Request) (string, error) {
