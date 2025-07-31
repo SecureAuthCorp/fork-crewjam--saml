@@ -351,6 +351,7 @@ type IdpAuthnRequest struct {
 	AssertionEl             *etree.Element
 	ResponseEl              *etree.Element
 	Now                     time.Time
+	IDPInitiated            bool
 }
 
 // NewIdpAuthnRequest returns a new IdpAuthnRequest for the given HTTP request to the authorization
@@ -388,6 +389,22 @@ func NewIdpAuthnRequest(idp *IdentityProvider, r *http.Request) (*IdpAuthnReques
 	}
 
 	return req, nil
+}
+
+func NewIdpInitiatedAuthnRequest(
+	idp *IdentityProvider,
+	spMetadata *EntityDescriptor,
+	spSsoDescriptor *SPSSODescriptor,
+	acsEndpoint *IndexedEndpoint,
+) *IdpAuthnRequest {
+	return &IdpAuthnRequest{
+		IDP:                     idp,
+		Now:                     TimeNow(),
+		ServiceProviderMetadata: spMetadata,
+		SPSSODescriptor:         spSsoDescriptor,
+		ACSEndpoint:             acsEndpoint,
+		IDPInitiated:            true,
+	}
 }
 
 func GetSPIssuer(r *http.Request) (string, error) {
