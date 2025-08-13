@@ -25,7 +25,7 @@ type Service struct {
 // service provider ID, which is typically the service provider's
 // metadata URL. If an appropriate service provider cannot be found then
 // the returned error must be os.ErrNotExist.
-func (s *Server) GetServiceProvider(_ *http.Request, serviceProviderID string) (*saml.EntityDescriptor, error) {
+func (s *Server) GetServiceProvider(_ *http.Request, serviceProviderID string, opts ...saml.GetSPOpt) (*saml.EntityDescriptor, error) {
 	s.idpConfigMu.RLock()
 	defer s.idpConfigMu.RUnlock()
 	rv, ok := s.serviceProviders[serviceProviderID]

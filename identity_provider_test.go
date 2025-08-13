@@ -102,7 +102,7 @@ func NewIdentifyProviderTest(t *testing.T) *IdentityProviderTest {
 		MetadataURL: "https://idp.example.com/saml/metadata",
 		SSOURL:      mustParseURL("https://idp.example.com/saml/sso"),
 		ServiceProviderProvider: &mockServiceProviderProvider{
-			GetServiceProviderFunc: func(r *http.Request, serviceProviderID string) (*EntityDescriptor, error) {
+			GetServiceProviderFunc: func(r *http.Request, serviceProviderID string, opts ...GetSPOpt) (*EntityDescriptor, error) {
 				if serviceProviderID == test.SP.MetadataURL.String() {
 					return test.SP.Metadata(), nil
 				}
@@ -130,11 +130,11 @@ func (msp *mockSessionProvider) GetSession(w http.ResponseWriter, r *http.Reques
 }
 
 type mockServiceProviderProvider struct {
-	GetServiceProviderFunc func(r *http.Request, serviceProviderID string) (*EntityDescriptor, error)
+	GetServiceProviderFunc func(r *http.Request, serviceProviderID string, opts ...GetSPOpt) (*EntityDescriptor, error)
 }
 
-func (mspp *mockServiceProviderProvider) GetServiceProvider(r *http.Request, serviceProviderID string) (*EntityDescriptor, error) {
-	return mspp.GetServiceProviderFunc(r, serviceProviderID)
+func (mspp *mockServiceProviderProvider) GetServiceProvider(r *http.Request, serviceProviderID string, opts ...GetSPOpt) (*EntityDescriptor, error) {
+	return mspp.GetServiceProviderFunc(r, serviceProviderID, opts...)
 }
 
 func TestIDPCanProduceMetadata(t *testing.T) {
@@ -810,7 +810,7 @@ func TestIDPCanHandleUnencryptedResponse(t *testing.T) {
 		&metadata)
 	assert.Check(t, err)
 	test.IDP.ServiceProviderProvider = &mockServiceProviderProvider{
-		GetServiceProviderFunc: func(r *http.Request, serviceProviderID string) (*EntityDescriptor, error) {
+		GetServiceProviderFunc: func(r *http.Request, serviceProviderID string, opts ...GetSPOpt) (*EntityDescriptor, error) {
 			if serviceProviderID == "https://gitlab.example.com/users/saml/metadata" {
 				return &metadata, nil
 			}
@@ -986,7 +986,7 @@ func TestIDPNoDestination(t *testing.T) {
 	err := xml.Unmarshal(golden.Get(t, "TestIDPNoDestination_idp_metadata.xml"), &metadata)
 	assert.Check(t, err)
 	test.IDP.ServiceProviderProvider = &mockServiceProviderProvider{
-		GetServiceProviderFunc: func(r *http.Request, serviceProviderID string) (*EntityDescriptor, error) {
+		GetServiceProviderFunc: func(r *http.Request, serviceProviderID string, opts ...GetSPOpt) (*EntityDescriptor, error) {
 			if serviceProviderID == "https://gitlab.example.com/users/saml/metadata" {
 				return &metadata, nil
 			}
