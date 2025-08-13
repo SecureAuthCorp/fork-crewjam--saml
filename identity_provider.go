@@ -407,7 +407,7 @@ func NewIdpInitiatedAuthnRequest(
 	}
 }
 
-func GetSPIssuer(r *http.Request) (string, error) {
+func GetAuthnRequest(r *http.Request) (AuthnRequest, error) {
 	var (
 		requestBuffer     []byte
 		compressedRequest []byte
@@ -421,32 +421,29 @@ func GetSPIssuer(r *http.Request) (string, error) {
 		switch r.Method {
 		case http.MethodGet:
 			if compressedRequest, err = base64.StdEncoding.DecodeString(samlRequest); err != nil {
-				return "", ErrInvalidSAMLRequest.WithErrorf(err, "cannot decode request")
+				return AuthnRequest{}, ErrInvalidSAMLRequest.WithErrorf(err, "cannot decode request")
 			}
 
 			if requestBuffer, err = io.ReadAll(newSaferFlateReader(bytes.NewReader(compressedRequest))); err != nil {
-				return "", ErrInvalidSAMLRequest.WithErrorf(err, "cannot decompress request")
+				return AuthnRequest{}, ErrInvalidSAMLRequest.WithErrorf(err, "cannot decompress request")
 			}
 		case http.MethodPost:
 			if requestBuffer, err = base64.StdEncoding.DecodeString(samlRequest); err != nil {
-				return "", ErrInvalidSAMLRequest.WithErrorf(err, "cannot decode request")
+				return AuthnRequest{}, ErrInvalidSAMLRequest.WithErrorf(err, "cannot decode request")
 			}
 		default:
-			return "", ErrInvalidSAMLRequest.WithMessagef("unsupported method %q", r.Method)
+			return AuthnRequest{}, ErrInvalidSAMLRequest.WithMessagef("unsupported method %q", r.Method)
 		}
 
 		if err = xml.Unmarshal(requestBuffer, &request); err != nil {
-			return "", ErrInvalidSAMLRequest.WithErrorf(err, "cannot parse request")
+			return AuthnRequest{}, ErrInvalidSAMLRequest.WithErrorf(err, "cannot parse request")
 		}
 
-		if request.Issuer != nil && request.Issuer.Value != "" {
-			return request.Issuer.Value, nil
-		}
+		return request, nil
 
-		return "", ErrInvalidSAMLRequest.WithMessage("no Issuer in request")
 	}
 
-	return "", ErrInvalidSAMLRequest.WithMessage("not a SAML request")
+	return AuthnRequest{}, ErrInvalidSAMLRequest.WithMessage("not a SAML request")
 }
 
 func isSAMLRequest(r *http.Request) (string, bool) {
