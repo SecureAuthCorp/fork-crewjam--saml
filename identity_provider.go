@@ -367,31 +367,13 @@ type IdpAuthnRequest struct {
 	LookupSPByACSWithFallback bool
 }
 
-type IdpAuthnRequestOption func(*idpAuthnRequestOptions)
-
-type idpAuthnRequestOptions struct {
-	lookupSPByACSWithFallback bool
-}
-
-func WithLookupSPByACSWithFallback() IdpAuthnRequestOption {
-	return func(o *idpAuthnRequestOptions) {
-		o.lookupSPByACSWithFallback = true
-	}
-}
-
 // NewIdpAuthnRequest returns a new IdpAuthnRequest for the given HTTP request to the authorization
 // service.
-func NewIdpAuthnRequest(idp *IdentityProvider, r *http.Request, opts ...IdpAuthnRequestOption) (*IdpAuthnRequest, error) {
-	o := idpAuthnRequestOptions{}
-	for _, opt := range opts {
-		opt(&o)
-	}
-
+func NewIdpAuthnRequest(idp *IdentityProvider, r *http.Request) (*IdpAuthnRequest, error) {
 	req := &IdpAuthnRequest{
-		IDP:                       idp,
-		HTTPRequest:               r,
-		Now:                       TimeNow(),
-		LookupSPByACSWithFallback: o.lookupSPByACSWithFallback,
+		IDP:         idp,
+		HTTPRequest: r,
+		Now:         TimeNow(),
 	}
 
 	switch r.Method {
