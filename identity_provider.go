@@ -60,18 +60,6 @@ type SessionProvider interface {
 	GetSession(w http.ResponseWriter, r *http.Request, req *IdpAuthnRequest) *Session
 }
 
-type GetSPOptions struct {
-	ACSURL string
-}
-
-type GetSPOpt func(*GetSPOptions)
-
-func WithACSURL(acsURL string) GetSPOpt {
-	return func(o *GetSPOptions) {
-		o.ACSURL = acsURL
-	}
-}
-
 // ServiceProviderProvider is an interface used by IdentityProvider to look up
 // service provider metadata for a request.
 type ServiceProviderProvider interface {
@@ -79,7 +67,7 @@ type ServiceProviderProvider interface {
 	// service provider ID, which is typically the service provider's
 	// metadata URL. If an appropriate service provider cannot be found then
 	// the returned error must be os.ErrNotExist.
-	GetServiceProvider(r *http.Request, serviceProviderID string, opts ...GetSPOpt) (*EntityDescriptor, error)
+	GetServiceProvider(r *http.Request, serviceProviderID string) (*EntityDescriptor, error)
 }
 
 // AssertionMaker is an interface used by IdentityProvider to construct the
@@ -351,20 +339,20 @@ func (idp *IdentityProvider) ServeIDPInitiated(w http.ResponseWriter, r *http.Re
 
 // IdpAuthnRequest is used by IdentityProvider to handle a single authentication request.
 type IdpAuthnRequest struct {
-	IDP                       *IdentityProvider
-	HTTPRequest               *http.Request
-	RelayState                string
-	RequestBuffer             []byte
-	Request                   AuthnRequest
-	ServiceProviderMetadata   *EntityDescriptor
-	SPSSODescriptor           *SPSSODescriptor
-	ACSEndpoint               *IndexedEndpoint
-	Assertion                 *Assertion
-	AssertionEl               *etree.Element
-	ResponseEl                *etree.Element
-	Now                       time.Time
-	IDPInitiated              bool
-	LookupSPByACSWithFallback bool
+	IDP                             *IdentityProvider
+	HTTPRequest                     *http.Request
+	RelayState                      string
+	RequestBuffer                   []byte
+	Request                         AuthnRequest
+	ServiceProviderMetadata         *EntityDescriptor
+	SPSSODescriptor                 *SPSSODescriptor
+	ACSEndpoint                     *IndexedEndpoint
+	Assertion                       *Assertion
+	AssertionEl                     *etree.Element
+	ResponseEl                      *etree.Element
+	Now                             time.Time
+	IDPInitiated                    bool
+	LookupSPByACSWithIssuerFallback bool
 }
 
 // NewIdpAuthnRequest returns a new IdpAuthnRequest for the given HTTP request to the authorization
@@ -527,19 +515,29 @@ func (req *IdpAuthnRequest) Validate() error {
 		return ErrInvalidSAMLRequest.WithMessagef("Expected SAML request version 2.0 got %v", req.Request.Version)
 	}
 
-	var opts []GetSPOpt
-
-	if req.LookupSPByACSWithFallback {
-		opts = append(opts, WithACSURL(req.Request.AssertionConsumerServiceURL))
-	}
-
 	// find the service provider
-	serviceProviderID := req.Request.Issuer.Value
-	serviceProvider, err := req.IDP.ServiceProviderProvider.GetServiceProvider(req.HTTPRequest, serviceProviderID, opts...)
-	if err != nil {
-		return ErrUnknownServiceProvider.WithErrorf(err, "cannot handle request from unknown service provider %s", serviceProviderID)
+	if req.LookupSPByACSWithIssuerFallback {
+		serviceProviderID := req.Request.AssertionConsumerServiceURL
+		serviceProvider, err := req.IDP.ServiceProviderProvider.GetServiceProvider(req.HTTPRequest, serviceProviderID)
+		if err == nil {
+			req.ServiceProviderMetadata = serviceProvider
+		} else {
+			// fallback to issuer
+			serviceProviderID := req.Request.Issuer.Value
+			serviceProvider, err := req.IDP.ServiceProviderProvider.GetServiceProvider(req.HTTPRequest, serviceProviderID)
+			if err != nil {
+				return ErrUnknownServiceProvider.WithErrorf(err, "cannot handle request from unknown service provider %s", serviceProviderID)
+			}
+			req.ServiceProviderMetadata = serviceProvider
+		}
+	} else {
+		serviceProviderID := req.Request.Issuer.Value
+		serviceProvider, err := req.IDP.ServiceProviderProvider.GetServiceProvider(req.HTTPRequest, serviceProviderID)
+		if err != nil {
+			return ErrUnknownServiceProvider.WithErrorf(err, "cannot handle request from unknown service provider %s", serviceProviderID)
+		}
+		req.ServiceProviderMetadata = serviceProvider
 	}
-	req.ServiceProviderMetadata = serviceProvider
 
 	// Check that the ACS URL matches an ACS endpoint in the SP metadata.
 	if err := req.getACSEndpoint(); err != nil {
