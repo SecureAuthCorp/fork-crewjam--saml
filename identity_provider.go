@@ -339,19 +339,20 @@ func (idp *IdentityProvider) ServeIDPInitiated(w http.ResponseWriter, r *http.Re
 
 // IdpAuthnRequest is used by IdentityProvider to handle a single authentication request.
 type IdpAuthnRequest struct {
-	IDP                     *IdentityProvider
-	HTTPRequest             *http.Request
-	RelayState              string
-	RequestBuffer           []byte
-	Request                 AuthnRequest
-	ServiceProviderMetadata *EntityDescriptor
-	SPSSODescriptor         *SPSSODescriptor
-	ACSEndpoint             *IndexedEndpoint
-	Assertion               *Assertion
-	AssertionEl             *etree.Element
-	ResponseEl              *etree.Element
-	Now                     time.Time
-	IDPInitiated            bool
+	IDP                             *IdentityProvider
+	HTTPRequest                     *http.Request
+	RelayState                      string
+	RequestBuffer                   []byte
+	Request                         AuthnRequest
+	ServiceProviderMetadata         *EntityDescriptor
+	SPSSODescriptor                 *SPSSODescriptor
+	ACSEndpoint                     *IndexedEndpoint
+	Assertion                       *Assertion
+	AssertionEl                     *etree.Element
+	ResponseEl                      *etree.Element
+	Now                             time.Time
+	IDPInitiated                    bool
+	LookupSPByACSWithIssuerFallback bool
 }
 
 // NewIdpAuthnRequest returns a new IdpAuthnRequest for the given HTTP request to the authorization
@@ -407,7 +408,7 @@ func NewIdpInitiatedAuthnRequest(
 	}
 }
 
-func GetSPIssuer(r *http.Request) (string, error) {
+func GetAuthnRequest(r *http.Request) (AuthnRequest, error) {
 	var (
 		requestBuffer     []byte
 		compressedRequest []byte
@@ -421,32 +422,29 @@ func GetSPIssuer(r *http.Request) (string, error) {
 		switch r.Method {
 		case http.MethodGet:
 			if compressedRequest, err = base64.StdEncoding.DecodeString(samlRequest); err != nil {
-				return "", ErrInvalidSAMLRequest.WithErrorf(err, "cannot decode request")
+				return AuthnRequest{}, ErrInvalidSAMLRequest.WithErrorf(err, "cannot decode request")
 			}
 
 			if requestBuffer, err = io.ReadAll(newSaferFlateReader(bytes.NewReader(compressedRequest))); err != nil {
-				return "", ErrInvalidSAMLRequest.WithErrorf(err, "cannot decompress request")
+				return AuthnRequest{}, ErrInvalidSAMLRequest.WithErrorf(err, "cannot decompress request")
 			}
 		case http.MethodPost:
 			if requestBuffer, err = base64.StdEncoding.DecodeString(samlRequest); err != nil {
-				return "", ErrInvalidSAMLRequest.WithErrorf(err, "cannot decode request")
+				return AuthnRequest{}, ErrInvalidSAMLRequest.WithErrorf(err, "cannot decode request")
 			}
 		default:
-			return "", ErrInvalidSAMLRequest.WithMessagef("unsupported method %q", r.Method)
+			return AuthnRequest{}, ErrInvalidSAMLRequest.WithMessagef("unsupported method %q", r.Method)
 		}
 
 		if err = xml.Unmarshal(requestBuffer, &request); err != nil {
-			return "", ErrInvalidSAMLRequest.WithErrorf(err, "cannot parse request")
+			return AuthnRequest{}, ErrInvalidSAMLRequest.WithErrorf(err, "cannot parse request")
 		}
 
-		if request.Issuer != nil && request.Issuer.Value != "" {
-			return request.Issuer.Value, nil
-		}
+		return request, nil
 
-		return "", ErrInvalidSAMLRequest.WithMessage("no Issuer in request")
 	}
 
-	return "", ErrInvalidSAMLRequest.WithMessage("not a SAML request")
+	return AuthnRequest{}, ErrInvalidSAMLRequest.WithMessage("not a SAML request")
 }
 
 func isSAMLRequest(r *http.Request) (string, bool) {
@@ -518,12 +516,28 @@ func (req *IdpAuthnRequest) Validate() error {
 	}
 
 	// find the service provider
-	serviceProviderID := req.Request.Issuer.Value
-	serviceProvider, err := req.IDP.ServiceProviderProvider.GetServiceProvider(req.HTTPRequest, serviceProviderID)
-	if err != nil {
-		return ErrUnknownServiceProvider.WithErrorf(err, "cannot handle request from unknown service provider %s", serviceProviderID)
+	if req.LookupSPByACSWithIssuerFallback {
+		serviceProviderID := req.Request.AssertionConsumerServiceURL
+		serviceProvider, err := req.IDP.ServiceProviderProvider.GetServiceProvider(req.HTTPRequest, serviceProviderID)
+		if err == nil {
+			req.ServiceProviderMetadata = serviceProvider
+		} else {
+			// fallback to issuer
+			serviceProviderID := req.Request.Issuer.Value
+			serviceProvider, err := req.IDP.ServiceProviderProvider.GetServiceProvider(req.HTTPRequest, serviceProviderID)
+			if err != nil {
+				return ErrUnknownServiceProvider.WithErrorf(err, "cannot handle request from unknown service provider %s", serviceProviderID)
+			}
+			req.ServiceProviderMetadata = serviceProvider
+		}
+	} else {
+		serviceProviderID := req.Request.Issuer.Value
+		serviceProvider, err := req.IDP.ServiceProviderProvider.GetServiceProvider(req.HTTPRequest, serviceProviderID)
+		if err != nil {
+			return ErrUnknownServiceProvider.WithErrorf(err, "cannot handle request from unknown service provider %s", serviceProviderID)
+		}
+		req.ServiceProviderMetadata = serviceProvider
 	}
-	req.ServiceProviderMetadata = serviceProvider
 
 	// Check that the ACS URL matches an ACS endpoint in the SP metadata.
 	if err := req.getACSEndpoint(); err != nil {

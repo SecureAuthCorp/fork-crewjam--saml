@@ -1040,12 +1040,12 @@ func TestIDPRejectDecompressionBomb(t *testing.T) {
 	assert.Error(t, err, "cannot decompress request: flate: uncompress limit exceeded (10485760 bytes)")
 }
 
-func TestGetSPIssuer(t *testing.T) {
+func TestGetAuthnRequest(t *testing.T) {
 	type testCase struct {
 		name           string
 		method         string
 		samlRequest    string // base64-encoded, optionally flate-compressed XML
-		wantIssuer     string
+		assertResp     func(*testing.T, AuthnRequest)
 		wantErrSubstr  string
 		prepareRequest func(*http.Request)
 	}
@@ -1077,13 +1077,17 @@ func TestGetSPIssuer(t *testing.T) {
 			name:        "GET valid SAMLRequest, compressed",
 			method:      http.MethodGet,
 			samlRequest: flateAndBase64(buildAuthnRequestXML("https://sp.example.com/metadata")),
-			wantIssuer:  "https://sp.example.com/metadata",
+			assertResp: func(t *testing.T, req AuthnRequest) {
+				assert.Check(t, is.Equal("https://sp.example.com/metadata", req.Issuer.Value))
+			},
 		},
 		{
 			name:        "POST valid SAMLRequest, not compressed",
 			method:      http.MethodPost,
 			samlRequest: base64Encode(buildAuthnRequestXML("https://sp.example.com/metadata")),
-			wantIssuer:  "https://sp.example.com/metadata",
+			assertResp: func(t *testing.T, req AuthnRequest) {
+				assert.Check(t, is.Equal("https://sp.example.com/metadata", req.Issuer.Value))
+			},
 		},
 		{
 			name:          "GET invalid base64",
@@ -1122,12 +1126,6 @@ func TestGetSPIssuer(t *testing.T) {
 			wantErrSubstr: "not a SAML request",
 		},
 		{
-			name:          "GET no Issuer in request",
-			method:        http.MethodGet,
-			samlRequest:   flateAndBase64([]byte(`<AuthnRequest xmlns="urn:oasis:names:tc:SAML:2.0:protocol" Version="2.0" ID="id-1" IssueInstant="2020-01-01T00:00:00Z"></AuthnRequest>`)),
-			wantErrSubstr: "no Issuer in request",
-		},
-		{
 			name:          "unsupported method",
 			method:        "PUT",
 			samlRequest:   base64Encode(buildAuthnRequestXML("https://sp.example.com/metadata")),
@@ -1163,13 +1161,15 @@ func TestGetSPIssuer(t *testing.T) {
 			if tc.prepareRequest != nil {
 				tc.prepareRequest(r)
 			}
-			gotIssuer, err := GetSPIssuer(r)
+			authnRequest, err := GetAuthnRequest(r)
 			if tc.wantErrSubstr != "" {
 				assert.Check(t, err != nil, "expected error containing %q", tc.wantErrSubstr)
 				assert.Check(t, strings.Contains(err.Error(), tc.wantErrSubstr), "got error: %v", err)
 			} else {
 				assert.Check(t, err == nil, "unexpected error: %v", err)
-				assert.Check(t, is.Equal(tc.wantIssuer, gotIssuer))
+				if tc.assertResp != nil {
+					tc.assertResp(t, authnRequest)
+				}
 			}
 		})
 	}
